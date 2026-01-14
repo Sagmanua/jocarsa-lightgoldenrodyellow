@@ -1,119 +1,191 @@
-# lightgoldenrodyellow.py
 
-Generador ligero de reportes Markdown para proyectos de código.
+# 📄 Generador de Reportes Markdown de Proyectos
 
-Este repositorio contiene un script en Python (`lightgoldenrodyellow.py`) que recorre una carpeta de proyecto y genera un **reporte en Markdown** con:
+Este script en Python genera automáticamente un **reporte completo en formato Markdown** (`.md`) a partir del contenido de una carpeta de código.  
+El reporte incluye:
 
-- Un **árbol de directorios** estilo `tree` (con exclusiones configurables).
-- El **código intercalado**: incluye el contenido de cada archivo permitido dentro de bloques Markdown con el lenguaje adecuado.
+- 🗂️ **Árbol de directorios** con indentación tipo `tree`
+- 💻 **Código fuente intercalado**, mostrando el contenido de cada archivo permitido dentro de bloques de código Markdown con su respectiva sintaxis resaltada.
 
 Ideal para:
-- Documentar proyectos rápidamente.
-- Compartir el estado de un repositorio (estructura + contenido) en un único `.md`.
-- Preparar material para revisión, auditoría o IA (contexto completo de un proyecto).
+- Documentar proyectos antes de publicarlos.
+- Crear informes de entregas o prácticas de programación.
+- Respaldar el código en un solo documento legible y portable.
 
 ---
 
-## Características
+## 🚀 Características
 
-- ✅ Árbol de directorios con conectores (`├──`, `└──`) y exclusión de carpetas comunes.
-- ✅ Inserta el contenido de archivos permitidos en bloques de código Markdown con *syntax highlighting*.
-- ✅ Configuración mínima: extensiones permitidas, carpetas excluidas y mapa de lenguajes.
-- ✅ Funciona con proyectos pequeños/medianos sin dependencias externas.
-
----
-
-## Requisitos
-
-- Python 3.8+ (recomendado)
-- Sin dependencias adicionales.
+✅ Genera un único archivo `.md` con todo el código del proyecto.  
+✅ Incluye un árbol visual de carpetas y archivos.  
+✅ Detecta el lenguaje automáticamente según la extensión.  
+✅ Omite carpetas comunes como `node_modules`, `.git`, `__pycache__`, etc.  
+✅ Permite definir tus propias extensiones o carpetas excluidas.  
 
 ---
 
-## Uso
+## 🧩 Extensiones soportadas
+
+El script incluye por defecto las siguientes extensiones:
+
+| Tipo de archivo | Extensión | Lenguaje usado en Markdown |
+|-----------------|------------|-----------------------------|
+| HTML            | `.html`    | html                        |
+| CSS             | `.css`     | css                         |
+| JavaScript      | `.js`      | js                          |
+| PHP             | `.php`     | php                         |
+| Python          | `.py`      | python                      |
+| Java            | `.java`    | java                        |
+| SQL             | `.sql`     | sql                         |
+| C / C++         | `.c`, `.cpp`, `.h` | c / cpp             |
+| CUDA            | `.cu`      | cuda                        |
+| JSON            | `.json`    | json                        |
+| XML             | `.xml`     | xml                         |
+| Markdown        | `.md`      | markdown                    |
+
+---
+
+## 📁 Carpetas excluidas por defecto
+
+Las siguientes carpetas no se incluyen en el análisis:
+
+```
+
+.git
+node_modules
+vendor
+venv
+.venv
+**pycache**
+modelo_entrenado
+
+````
+
+Puedes modificar la constante `CARPETAS_EXCLUIDAS` en el script para personalizar esta lista.
+
+---
+
+## ⚙️ Instalación
+
+No requiere dependencias externas más allá de Python 3.
+
+```bash
+git clone https://github.com/tuusuario/generador-reporte-markdown.git
+cd generador-reporte-markdown
+chmod +x generador_reporte.py
+````
+
+---
+
+## 🖥️ Uso
 
 Ejecuta el script indicando:
 
-1) carpeta origen a inspeccionar  
-2) carpeta destino donde guardar el reporte
+1. La carpeta **origen** del proyecto.
+2. La carpeta **destino** donde se guardará el reporte.
 
 ```bash
-python3 lightgoldenrodyellow.py /ruta/al/proyecto /ruta/destino
+./generador_reporte.py /ruta/a/tu/proyecto /ruta/de/salida
+```
+
+### Ejemplo:
+
+```bash
+./generador_reporte.py ~/proyectos/miapp ./reportes
+```
+
+Salida esperada:
+
+```
+[OK] Reporte generado: /ruta/absoluta/reportes/miapp_20251105184522.md
+```
+
+---
+
+## 🧠 Estructura del resultado
+
+El archivo Markdown generado incluye:
+
+```markdown
+# Reporte de proyecto
+
+## Estructura del proyecto
+```
+
+```
+/ruta/al/proyecto
+├── index.html
+├── styles.css
+└── src
+    ├── app.py
+    └── utils.py
+```
+
+````markdown
+## Código (intercalado)
+
+# src
+**app.py**
+```python
+print("Hola mundo")
 ````
 
-Ejemplo:
-
-```bash
-python3 lightgoldenrodyellow.py ./mi_proyecto ./reportes
-```
-
-Salida típica:
-
-```
-[OK] Reporte generado: /ruta/destino/mi_proyecto_20260114091530.md
-```
-
----
-
-## Qué incluye el reporte
-
-El `.md` generado tendrá esta estructura:
-
-* `# Reporte de proyecto`
-* `## Estructura del proyecto` (árbol completo)
-* `## Código (intercalado)` (por carpetas y archivos)
-
-Los archivos se incluyen solo si su extensión está en `EXTENSIONES_PERMITIDAS`, y las carpetas se omiten si están en `CARPETAS_EXCLUIDAS`.
-
----
-
-## Configuración
-
-Dentro del script puedes ajustar:
-
-### Extensiones permitidas
+**utils.py**
 
 ```python
-EXTENSIONES_PERMITIDAS = (
-    ".html", ".css", ".js", ".php", ".py", ".java", ".sql",
-    ".c", ".cpp", ".cu", ".h", ".json", ".xml", ".md"
-)
+def suma(a, b):
+    return a + b
 ```
 
-### Carpetas excluidas
-
-```python
-CARPETAS_EXCLUIDAS = {
-    ".git", "node_modules", "vendor", "venv", "__pycache__",
-    "modelo_entrenado", ".venv","dist"
-}
-```
-
-### Mapeo de lenguaje (Markdown fences)
-
-```python
-LANG_MAP = {
-  ".py": "python",
-  ".js": "js",
-  ".cpp": "cpp",
-  ...
-}
 ```
 
 ---
 
-## Notas y recomendaciones
+## 🧩 Integración y personalización
 
-* Si tu proyecto contiene archivos grandes, el reporte puede crecer mucho.
-* Para evitar incluir secretos (tokens, claves), revisa el contenido antes de compartir el `.md`.
-* Si necesitas excluir archivos concretos (por patrón), se puede ampliar fácilmente.
+Puedes integrar este script en pipelines de documentación o CI/CD para generar automáticamente un `.md` de cada commit o versión de tu código.
+
+### Opciones posibles de personalización:
+- Cambiar la lista de extensiones soportadas (`EXTENSIONES_PERMITIDAS`).
+- Excluir o incluir carpetas adicionales.
+- Modificar el formato del nombre del archivo generado.
+- Integrar metadatos como autor, fecha o hash de commit.
 
 ---
 
-## Licencia
+## 🧑‍💻 Autor
 
-Añade aquí la licencia que prefieras (MIT, Apache-2.0, GPL, etc.).
-Si no tienes una aún, una opción habitual para scripts utilitarios es **MIT**.
+**José Vicente Carratalá Sanchis**  
+📧 [info@josevicentecarratala.com](mailto:info@josevicentecarratala.com)  
+🌐 [https://www.josevicentecarratala.com](https://www.josevicentecarratala.com)  
+💼 [JOCARSA](https://jocarsa.com)
+
+---
+
+## 🪪 Licencia
+
+Este proyecto se distribuye bajo la licencia **MIT**.  
+Eres libre de usarlo, modificarlo y compartirlo, siempre que mantengas la atribución al autor original.
+
+```
+
+MIT License © 2025 José Vicente Carratalá Sanchis
+
+```
+
+---
+
+## ⭐ Ejemplo visual
+
+![Ejemplo del reporte](https://raw.githubusercontent.com/tuusuario/generador-reporte-markdown/main/preview.png)
+
+---
+
+## 📘 Historial de versiones
+
+| Versión | Fecha | Cambios principales |
+|----------|--------|---------------------|
+| 1.0.0 | 2025-11-05 | Versión inicial pública |
 
 ---
 
