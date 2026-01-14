@@ -13,7 +13,7 @@ EXTENSIONES_PERMITIDAS = (
 )
 CARPETAS_EXCLUIDAS = {
     ".git", "node_modules", "vendor", "venv", "__pycache__",
-    "modelo_entrenado", ".venv"
+    "modelo_entrenado", ".venv","dist"
 }
 
 LANG_MAP = {

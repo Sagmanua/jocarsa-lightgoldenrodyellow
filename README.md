@@ -1,37 +1,121 @@
-# Generador de Prompt (Flask)
+# lightgoldenrodyellow.py
 
-Versión web del app de Tkinter con una interfaz moderna (Bootstrap 5), render de Markdown (marked.js) y resaltado de código (highlight.js).
+Generador ligero de reportes Markdown para proyectos de código.
 
-## Requisitos
-- Python 3.10+
-- pip
+Este repositorio contiene un script en Python (`lightgoldenrodyellow.py`) que recorre una carpeta de proyecto y genera un **reporte en Markdown** con:
 
-## Instalación
-```bash
-cd prompt_generator_webapp
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
+- Un **árbol de directorios** estilo `tree` (con exclusiones configurables).
+- El **código intercalado**: incluye el contenido de cada archivo permitido dentro de bloques Markdown con el lenguaje adecuado.
 
-## Uso
-```bash
-python app.py
-# abre http://127.0.0.1:5000
-```
+Ideal para:
+- Documentar proyectos rápidamente.
+- Compartir el estado de un repositorio (estructura + contenido) en un único `.md`.
+- Preparar material para revisión, auditoría o IA (contexto completo de un proyecto).
 
-> **Nota:** Al ejecutarlo en local, el selector de carpetas funciona como un mini-explorador de rutas del sistema desde el navegador. 
-Las operaciones de análisis (`os.walk`, SQLite y MySQL) se ejecutan en el servidor local (Flask), por lo que deben apuntar a rutas válidas de tu máquina.
+---
 
 ## Características
-- **Parámetros del prompt**: Contexto, Objetivo, Restricciones, Formato.
-- **Explorador de carpetas** integrado para elegir el proyecto.
-- **Generación de estructura y reporte intercalado** del código (mismas reglas que el Tkinter).
-- **Análisis de base de datos** SQLite o MySQL (opcional PyMySQL).
-- **Vista Markdown y WYSIWYG** con resaltado.
-- **Guardar reportes** con nombre `<carpeta>_YYYYmmddHHMMSS.txt`.
-- **Guardar prompts de subcarpetas `jocarsa-*`** en carpeta `prompts/`.
-- **Persistencia** en `config.json`.
+
+- ✅ Árbol de directorios con conectores (`├──`, `└──`) y exclusión de carpetas comunes.
+- ✅ Inserta el contenido de archivos permitidos en bloques de código Markdown con *syntax highlighting*.
+- ✅ Configuración mínima: extensiones permitidas, carpetas excluidas y mapa de lenguajes.
+- ✅ Funciona con proyectos pequeños/medianos sin dependencias externas.
+
+---
+
+## Requisitos
+
+- Python 3.8+ (recomendado)
+- Sin dependencias adicionales.
+
+---
+
+## Uso
+
+Ejecuta el script indicando:
+
+1) carpeta origen a inspeccionar  
+2) carpeta destino donde guardar el reporte
+
+```bash
+python3 lightgoldenrodyellow.py /ruta/al/proyecto /ruta/destino
+````
+
+Ejemplo:
+
+```bash
+python3 lightgoldenrodyellow.py ./mi_proyecto ./reportes
+```
+
+Salida típica:
+
+```
+[OK] Reporte generado: /ruta/destino/mi_proyecto_20260114091530.md
+```
+
+---
+
+## Qué incluye el reporte
+
+El `.md` generado tendrá esta estructura:
+
+* `# Reporte de proyecto`
+* `## Estructura del proyecto` (árbol completo)
+* `## Código (intercalado)` (por carpetas y archivos)
+
+Los archivos se incluyen solo si su extensión está en `EXTENSIONES_PERMITIDAS`, y las carpetas se omiten si están en `CARPETAS_EXCLUIDAS`.
+
+---
 
 ## Configuración
-Pulsa "Guardar configuración" para actualizar `config.json`.
+
+Dentro del script puedes ajustar:
+
+### Extensiones permitidas
+
+```python
+EXTENSIONES_PERMITIDAS = (
+    ".html", ".css", ".js", ".php", ".py", ".java", ".sql",
+    ".c", ".cpp", ".cu", ".h", ".json", ".xml", ".md"
+)
+```
+
+### Carpetas excluidas
+
+```python
+CARPETAS_EXCLUIDAS = {
+    ".git", "node_modules", "vendor", "venv", "__pycache__",
+    "modelo_entrenado", ".venv","dist"
+}
+```
+
+### Mapeo de lenguaje (Markdown fences)
+
+```python
+LANG_MAP = {
+  ".py": "python",
+  ".js": "js",
+  ".cpp": "cpp",
+  ...
+}
+```
+
+---
+
+## Notas y recomendaciones
+
+* Si tu proyecto contiene archivos grandes, el reporte puede crecer mucho.
+* Para evitar incluir secretos (tokens, claves), revisa el contenido antes de compartir el `.md`.
+* Si necesitas excluir archivos concretos (por patrón), se puede ampliar fácilmente.
+
+---
+
+## Licencia
+
+Añade aquí la licencia que prefieras (MIT, Apache-2.0, GPL, etc.).
+Si no tienes una aún, una opción habitual para scripts utilitarios es **MIT**.
+
+---
+
+
+
