@@ -2,6 +2,10 @@
 import os
 import sys
 import argparse
+import json
+import hashlib
+import urllib.request
+import urllib.error
 from datetime import datetime
 
 # =========================
@@ -9,11 +13,13 @@ from datetime import datetime
 # =========================
 EXTENSIONES_PERMITIDAS = (
     ".html", ".css", ".js", ".php", ".py", ".java", ".sql",
-    ".c", ".cpp", ".cu", ".h", ".json", ".xml", ".md"
+    ".c", ".cpp", ".cu", ".h", ".json", ".xml", ".md", ".noema"
 )
+
 CARPETAS_EXCLUIDAS = {
     ".git", "node_modules", "vendor", "venv", "__pycache__",
-    "modelo_entrenado", ".venv","dist"
+    "modelo_entrenado", ".venv", "dist",
+    "documentacion",  # <-- NUEVO: evitar folder documentacion
 }
 
 LANG_MAP = {
@@ -22,6 +28,88 @@ LANG_MAP = {
     ".cpp": "cpp", ".cu": "cuda", ".h": "c", ".json": "json",
     ".xml": "xml", ".md": "markdown",
 }
+
+# =========================
+# IA (Ollama)
+# =========================
+DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
+DEFAULT_MODEL = "qwen2.5-coder:7b"
+
+def ollama_generate(prompt: str, ollama_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_MODEL, timeout: int = 180) -> str:
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        ollama_url,
+        data=data,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+            j = json.loads(raw)
+            return (j.get("response") or "").strip()
+    except urllib.error.HTTPError as e:
+        return f"[IA ERROR] HTTPError {e.code}: {e.reason}"
+    except urllib.error.URLError as e:
+        return f"[IA ERROR] URLError: {e.reason}"
+    except Exception as e:
+        return f"[IA ERROR] {e}"
+
+def _sha1(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()
+
+def resumir_archivo_con_ia(ruta_archivo: str, contenido: str, relpath: str, ollama_url: str, model: str) -> str:
+    # Recorte para evitar prompts gigantes (ajusta si quieres)
+    max_chars = 12000
+    snippet = contenido[:max_chars]
+
+    prompt = f"""
+Eres un asistente que resume código para documentación interna.
+
+Devuelve SOLO un resumen en español, conciso y útil, en 3 a 8 líneas.
+NO uses Markdown. NO uses viñetas con caracteres raros. Evita florituras.
+
+Ruta del archivo: {relpath}
+
+Contenido (posiblemente recortado):
+{snippet}
+""".strip()
+
+    return ollama_generate(prompt, ollama_url=ollama_url, model=model)
+
+def resumir_carpeta_con_ia(nombre_carpeta: str, relpath: str, archivos_info: list, ollama_url: str, model: str) -> str:
+    """
+    archivos_info: lista de dicts:
+      { "path": "...", "summary": "...", "name": "...", "ext": "..."}
+    """
+    # Construye un contexto compacto para la carpeta
+    # (solo nombres y resúmenes ya calculados)
+    partes = []
+    for a in archivos_info[:80]:  # límite defensivo
+        s = (a.get("summary") or "").replace("\n", " ").strip()
+        if len(s) > 300:
+            s = s[:300] + "…"
+        partes.append(f"- {a.get('path')}: {s}")
+
+    contexto = "\n".join(partes)
+
+    prompt = f"""
+Eres un asistente que resume una carpeta de proyecto a partir de los resúmenes de sus archivos.
+
+Devuelve SOLO un resumen en español, conciso y útil, en 3 a 8 líneas.
+NO uses Markdown. NO uses listas largas. Enfócate en propósito y componentes clave.
+
+Carpeta: {relpath} (nombre: {nombre_carpeta})
+
+Resúmenes de archivos:
+{contexto}
+""".strip()
+
+    return ollama_generate(prompt, ollama_url=ollama_url, model=model)
 
 # =========================
 # Utilidades
@@ -37,7 +125,7 @@ def construir_mapa_directorios(ruta_raiz: str) -> str:
             entradas = sorted(os.listdir(dir_path))
         except Exception:
             return
-        # Filtra carpetas excluidas
+
         entradas_visibles = []
         for e in entradas:
             full = os.path.join(dir_path, e)
@@ -56,15 +144,30 @@ def construir_mapa_directorios(ruta_raiz: str) -> str:
     interno(ruta_raiz)
     return "\n".join(lineas)
 
-
-def generar_reporte_intercalado(ruta_raiz: str, nivel: int = 1) -> str:
+def generar_reporte_intercalado(
+    ruta_raiz: str,
+    nivel: int = 1,
+    usar_ia: bool = False,
+    ollama_url: str = DEFAULT_OLLAMA_URL,
+    model: str = DEFAULT_MODEL,
+    cache: dict | None = None,
+    rel_base: str | None = None
+) -> str:
     """
     Recorre la carpeta y, para cada archivo con extensión permitida,
     inserta su contenido en un bloque de código Markdown.
+    Si usar_ia=True, añade resúmenes de carpeta y archivo.
     """
     encabezado = "#" * nivel
     nombre_carpeta = os.path.basename(ruta_raiz) or ruta_raiz
     lineas = [f"{encabezado} {nombre_carpeta}"]
+
+    if rel_base is None:
+        rel_base = ruta_raiz
+
+    relpath_carpeta = os.path.relpath(ruta_raiz, start=rel_base)
+    if relpath_carpeta == ".":
+        relpath_carpeta = os.path.basename(os.path.abspath(ruta_raiz))
 
     try:
         entradas = sorted(os.listdir(ruta_raiz))
@@ -72,39 +175,119 @@ def generar_reporte_intercalado(ruta_raiz: str, nivel: int = 1) -> str:
         lineas.append(f"Error listando la carpeta: {e}")
         return "\n".join(lineas)
 
+    # --------
     # Archivos de este nivel
+    # --------
+    archivos_resumen_carpeta = []  # para IA (resumen de carpeta)
     for entrada in entradas:
         ruta_completa = os.path.join(ruta_raiz, entrada)
         if os.path.isfile(ruta_completa) and entrada.lower().endswith(EXTENSIONES_PERMITIDAS):
             ext = os.path.splitext(entrada)[1].lower()
             lang = LANG_MAP.get(ext, "")
             lineas.append(f"**{entrada}**")
+
             try:
                 with open(ruta_completa, "r", encoding="utf-8", errors="ignore") as f:
                     contenido = f.read()
             except Exception as e:
                 contenido = f"Error al leer el archivo: {e}"
+
+            relpath_archivo = os.path.relpath(ruta_completa, start=rel_base)
+
+            # Resumen IA por archivo (si aplica)
+            resumen_archivo = ""
+            if usar_ia:
+                if cache is None:
+                    cache = {}
+                key = "file:" + _sha1(relpath_archivo + "\n" + contenido[:12000])
+                if key in cache:
+                    resumen_archivo = cache[key]
+                else:
+                    resumen_archivo = resumir_archivo_con_ia(
+                        ruta_archivo=ruta_completa,
+                        contenido=contenido,
+                        relpath=relpath_archivo,
+                        ollama_url=ollama_url,
+                        model=model
+                    )
+                    cache[key] = resumen_archivo
+
+                lineas.append(f"Resumen (IA): {resumen_archivo}")
+
+                archivos_resumen_carpeta.append({
+                    "path": relpath_archivo,
+                    "name": entrada,
+                    "ext": ext,
+                    "summary": resumen_archivo
+                })
+
+            # Bloque de código
             lineas.append(f"```{lang}")
             lineas.append(contenido)
             lineas.append("```")
 
+    # Resumen IA de carpeta (si aplica)
+    if usar_ia:
+        if cache is None:
+            cache = {}
+        key = "dir:" + _sha1(relpath_carpeta + "\n" + json.dumps(archivos_resumen_carpeta, ensure_ascii=False))
+        if key in cache:
+            resumen_carpeta = cache[key]
+        else:
+            resumen_carpeta = resumir_carpeta_con_ia(
+                nombre_carpeta=nombre_carpeta,
+                relpath=relpath_carpeta,
+                archivos_info=archivos_resumen_carpeta,
+                ollama_url=ollama_url,
+                model=model
+            )
+            cache[key] = resumen_carpeta
+
+        lineas.insert(1, f"Resumen de carpeta (IA): {resumen_carpeta}")
+
+    # --------
     # Subcarpetas (excluyendo las no deseadas)
+    # --------
     for entrada in entradas:
         ruta_completa = os.path.join(ruta_raiz, entrada)
         if os.path.isdir(ruta_completa) and entrada not in CARPETAS_EXCLUIDAS:
-            lineas.append(generar_reporte_intercalado(ruta_completa, nivel + 1))
+            lineas.append(
+                generar_reporte_intercalado(
+                    ruta_completa,
+                    nivel + 1,
+                    usar_ia=usar_ia,
+                    ollama_url=ollama_url,
+                    model=model,
+                    cache=cache,
+                    rel_base=rel_base
+                )
+            )
 
     return "\n".join(lineas)
 
-
-def generar_reporte(ruta_origen: str) -> str:
+def generar_reporte(
+    ruta_origen: str,
+    usar_ia: bool = False,
+    ollama_url: str = DEFAULT_OLLAMA_URL,
+    model: str = DEFAULT_MODEL
+) -> str:
     """
     Genera el contenido completo del reporte en Markdown:
     - Árbol de directorios
     - Código intercalado
+    - (Opcional) Resúmenes IA de carpeta y archivo
     """
     arbol = construir_mapa_directorios(ruta_origen)
-    intercalado = generar_reporte_intercalado(ruta_origen)
+
+    cache = {}
+    intercalado = generar_reporte_intercalado(
+        ruta_origen,
+        usar_ia=usar_ia,
+        ollama_url=ollama_url,
+        model=model,
+        cache=cache,
+        rel_base=ruta_origen
+    )
 
     partes = []
     partes.append("# Reporte de proyecto\n")
@@ -113,7 +296,6 @@ def generar_reporte(ruta_origen: str) -> str:
     partes.append("## Código (intercalado)\n")
     partes.append(intercalado)
     return "\n".join(partes)
-
 
 # =========================
 # CLI
@@ -124,6 +306,26 @@ def main():
     )
     parser.add_argument("source_root", help="Carpeta origen a inspeccionar")
     parser.add_argument("dest_folder", help="Carpeta destino donde guardar el reporte")
+
+    # NUEVO: flag IA
+    parser.add_argument(
+        "-ia", "--ia",
+        action="store_true",
+        help="Si se indica, usa Ollama (qwen2.5-coder:7b) para resumir cada archivo y carpeta (en español)."
+    )
+
+    # Opcionales por si quieres cambiar endpoint/modelo sin tocar código
+    parser.add_argument(
+        "--ollama-url",
+        default=DEFAULT_OLLAMA_URL,
+        help=f"URL del endpoint de Ollama (por defecto: {DEFAULT_OLLAMA_URL})"
+    )
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"Modelo de Ollama (por defecto: {DEFAULT_MODEL})"
+    )
+
     args = parser.parse_args()
 
     source_root = os.path.abspath(args.source_root)
@@ -131,6 +333,11 @@ def main():
 
     if not os.path.isdir(source_root):
         print(f"[ERROR] La carpeta origen no existe o no es un directorio: {source_root}", file=sys.stderr)
+        sys.exit(1)
+
+    # Evita documentacion si te pasan directamente esa carpeta
+    if os.path.basename(source_root.rstrip(os.sep)) in CARPETAS_EXCLUIDAS:
+        print(f"[ERROR] La carpeta origen está excluida por configuración: {source_root}", file=sys.stderr)
         sys.exit(1)
 
     os.makedirs(dest_folder, exist_ok=True)
@@ -141,7 +348,12 @@ def main():
     out_path = os.path.join(dest_folder, out_name)
 
     try:
-        contenido = generar_reporte(source_root)
+        contenido = generar_reporte(
+            source_root,
+            usar_ia=bool(args.ia),
+            ollama_url=args.ollama_url,
+            model=args.model
+        )
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(contenido)
     except KeyboardInterrupt:
@@ -152,8 +364,8 @@ def main():
         sys.exit(2)
 
     print(f"[OK] Reporte generado: {out_path}")
-
+    if args.ia:
+        print(f"[OK] IA activada: modelo={args.model} url={args.ollama_url}")
 
 if __name__ == "__main__":
     main()
-
