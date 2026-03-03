@@ -19,7 +19,7 @@ EXTENSIONES_PERMITIDAS = (
 CARPETAS_EXCLUIDAS = {
     ".git", "node_modules", "vendor", "venv", "__pycache__",
     "modelo_entrenado", ".venv", "dist",
-    "documentacion",  # <-- NUEVO: evitar folder documentacion
+    "documentacion",  # <-- evitar folder documentacion (global)
 }
 
 LANG_MAP = {
@@ -34,6 +34,7 @@ LANG_MAP = {
 # =========================
 DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
 DEFAULT_MODEL = "qwen2.5-coder:7b"
+
 
 def ollama_generate(prompt: str, ollama_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_MODEL, timeout: int = 180) -> str:
     payload = {
@@ -59,8 +60,10 @@ def ollama_generate(prompt: str, ollama_url: str = DEFAULT_OLLAMA_URL, model: st
     except Exception as e:
         return f"[IA ERROR] {e}"
 
+
 def _sha1(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()
+
 
 def resumir_archivo_con_ia(ruta_archivo: str, contenido: str, relpath: str, ollama_url: str, model: str) -> str:
     # Recorte para evitar prompts gigantes (ajusta si quieres)
@@ -71,7 +74,9 @@ def resumir_archivo_con_ia(ruta_archivo: str, contenido: str, relpath: str, olla
 Eres un asistente que resume código para documentación interna.
 
 Devuelve SOLO un resumen en español, conciso y útil, en 3 a 8 líneas.
-NO uses Markdown. NO uses viñetas con caracteres raros. Evita florituras.
+NO uses Markdown.
+NO uses viñetas con caracteres raros.
+Evita florituras.
 
 Ruta del archivo: {relpath}
 
@@ -80,6 +85,7 @@ Contenido (posiblemente recortado):
 """.strip()
 
     return ollama_generate(prompt, ollama_url=ollama_url, model=model)
+
 
 def resumir_carpeta_con_ia(nombre_carpeta: str, relpath: str, archivos_info: list, ollama_url: str, model: str) -> str:
     """
@@ -101,7 +107,8 @@ def resumir_carpeta_con_ia(nombre_carpeta: str, relpath: str, archivos_info: lis
 Eres un asistente que resume una carpeta de proyecto a partir de los resúmenes de sus archivos.
 
 Devuelve SOLO un resumen en español, conciso y útil, en 3 a 8 líneas.
-NO uses Markdown. NO uses listas largas. Enfócate en propósito y componentes clave.
+NO uses Markdown.
+NO uses listas largas. Enfócate en propósito y componentes clave.
 
 Carpeta: {relpath} (nombre: {nombre_carpeta})
 
@@ -111,16 +118,33 @@ Resúmenes de archivos:
 
     return ollama_generate(prompt, ollama_url=ollama_url, model=model)
 
+
 # =========================
 # Utilidades
 # =========================
-def construir_mapa_directorios(ruta_raiz: str) -> str:
-    """Devuelve un árbol de directorios estilo 'tree', excluyendo carpetas no deseadas."""
+def parse_exclude_list(value: str) -> set[str]:
+    """
+    Parses comma-separated list: "a,b,c" -> {"a","b","c"}
+    Accepts empty/None.
+    """
+    if not value:
+        return set()
+    parts = [p.strip() for p in value.split(",")]
+    return {p for p in parts if p}
+
+
+def construir_mapa_directorios(ruta_raiz: str, excluir_root: set[str] | None = None) -> str:
+    """Devuelve un árbol de directorios estilo 'tree', excluyendo carpetas no deseadas.
+       excluir_root: carpetas excluidas SOLO en el nivel raíz del proyecto.
+    """
+    if excluir_root is None:
+        excluir_root = set()
+
     lineas = []
     raiz_abs = os.path.abspath(ruta_raiz)
     lineas.append(raiz_abs)
 
-    def interno(dir_path: str, prefijo: str = ""):
+    def interno(dir_path: str, prefijo: str = "", es_root: bool = False):
         try:
             entradas = sorted(os.listdir(dir_path))
         except Exception:
@@ -129,8 +153,15 @@ def construir_mapa_directorios(ruta_raiz: str) -> str:
         entradas_visibles = []
         for e in entradas:
             full = os.path.join(dir_path, e)
+
+            # Exclusión global
             if os.path.isdir(full) and e in CARPETAS_EXCLUIDAS:
                 continue
+
+            # Exclusión SOLO en raíz
+            if es_root and os.path.isdir(full) and e in excluir_root:
+                continue
+
             entradas_visibles.append(e)
 
         for i, entrada in enumerate(entradas_visibles):
@@ -139,10 +170,11 @@ def construir_mapa_directorios(ruta_raiz: str) -> str:
             lineas.append(prefijo + conector + entrada)
             if os.path.isdir(ruta_completa):
                 extension = "    " if i == len(entradas_visibles) - 1 else "│   "
-                interno(ruta_completa, prefijo + extension)
+                interno(ruta_completa, prefijo + extension, es_root=False)
 
-    interno(ruta_raiz)
+    interno(ruta_raiz, es_root=True)
     return "\n".join(lineas)
+
 
 def generar_reporte_intercalado(
     ruta_raiz: str,
@@ -151,13 +183,21 @@ def generar_reporte_intercalado(
     ollama_url: str = DEFAULT_OLLAMA_URL,
     model: str = DEFAULT_MODEL,
     cache: dict | None = None,
-    rel_base: str | None = None
+    rel_base: str | None = None,
+    root_excludes: set[str] | None = None,
+    _is_root: bool = False
 ) -> str:
     """
     Recorre la carpeta y, para cada archivo con extensión permitida,
     inserta su contenido en un bloque de código Markdown.
     Si usar_ia=True, añade resúmenes de carpeta y archivo.
+
+    root_excludes: carpetas a excluir SOLO en el nivel raíz del proyecto.
+    _is_root: uso interno para saber si estamos en la raíz del proyecto.
     """
+    if root_excludes is None:
+        root_excludes = set()
+
     encabezado = "#" * nivel
     nombre_carpeta = os.path.basename(ruta_raiz) or ruta_raiz
     lineas = [f"{encabezado} {nombre_carpeta}"]
@@ -179,6 +219,7 @@ def generar_reporte_intercalado(
     # Archivos de este nivel
     # --------
     archivos_resumen_carpeta = []  # para IA (resumen de carpeta)
+
     for entrada in entradas:
         ruta_completa = os.path.join(ruta_raiz, entrada)
         if os.path.isfile(ruta_completa) and entrada.lower().endswith(EXTENSIONES_PERMITIDAS):
@@ -250,7 +291,16 @@ def generar_reporte_intercalado(
     # --------
     for entrada in entradas:
         ruta_completa = os.path.join(ruta_raiz, entrada)
-        if os.path.isdir(ruta_completa) and entrada not in CARPETAS_EXCLUIDAS:
+
+        if os.path.isdir(ruta_completa):
+            # Exclusión global
+            if entrada in CARPETAS_EXCLUIDAS:
+                continue
+
+            # Exclusión SOLO en raíz
+            if _is_root and entrada in root_excludes:
+                continue
+
             lineas.append(
                 generar_reporte_intercalado(
                     ruta_completa,
@@ -259,25 +309,34 @@ def generar_reporte_intercalado(
                     ollama_url=ollama_url,
                     model=model,
                     cache=cache,
-                    rel_base=rel_base
+                    rel_base=rel_base,
+                    root_excludes=root_excludes,
+                    _is_root=False
                 )
             )
 
     return "\n".join(lineas)
 
+
 def generar_reporte(
     ruta_origen: str,
     usar_ia: bool = False,
     ollama_url: str = DEFAULT_OLLAMA_URL,
-    model: str = DEFAULT_MODEL
+    model: str = DEFAULT_MODEL,
+    exclude_root: set[str] | None = None
 ) -> str:
     """
     Genera el contenido completo del reporte en Markdown:
     - Árbol de directorios
     - Código intercalado
     - (Opcional) Resúmenes IA de carpeta y archivo
+
+    exclude_root: carpetas excluidas SOLO en el nivel raíz del proyecto.
     """
-    arbol = construir_mapa_directorios(ruta_origen)
+    if exclude_root is None:
+        exclude_root = set()
+
+    arbol = construir_mapa_directorios(ruta_origen, excluir_root=exclude_root)
 
     cache = {}
     intercalado = generar_reporte_intercalado(
@@ -286,7 +345,9 @@ def generar_reporte(
         ollama_url=ollama_url,
         model=model,
         cache=cache,
-        rel_base=ruta_origen
+        rel_base=ruta_origen,
+        root_excludes=exclude_root,
+        _is_root=True
     )
 
     partes = []
@@ -296,6 +357,7 @@ def generar_reporte(
     partes.append("## Código (intercalado)\n")
     partes.append(intercalado)
     return "\n".join(partes)
+
 
 # =========================
 # CLI
@@ -307,14 +369,14 @@ def main():
     parser.add_argument("source_root", help="Carpeta origen a inspeccionar")
     parser.add_argument("dest_folder", help="Carpeta destino donde guardar el reporte")
 
-    # NUEVO: flag IA
+    # Flag IA
     parser.add_argument(
         "-ia", "--ia",
         action="store_true",
-        help="Si se indica, usa Ollama (qwen2.5-coder:7b) para resumir cada archivo y carpeta (en español)."
+        help="Si se indica, usa Ollama para resumir cada archivo y carpeta (en español)."
     )
 
-    # Opcionales por si quieres cambiar endpoint/modelo sin tocar código
+    # Opcionales endpoint/modelo
     parser.add_argument(
         "--ollama-url",
         default=DEFAULT_OLLAMA_URL,
@@ -326,6 +388,13 @@ def main():
         help=f"Modelo de Ollama (por defecto: {DEFAULT_MODEL})"
     )
 
+    # NUEVO: excluir carpetas SOLO en el nivel raíz del proyecto
+    parser.add_argument(
+        "--exclude-root",
+        default="",
+        help="Lista separada por comas de carpetas a excluir SOLO en la raíz del proyecto. Ej: build,docs,tmp"
+    )
+
     args = parser.parse_args()
 
     source_root = os.path.abspath(args.source_root)
@@ -335,10 +404,12 @@ def main():
         print(f"[ERROR] La carpeta origen no existe o no es un directorio: {source_root}", file=sys.stderr)
         sys.exit(1)
 
-    # Evita documentacion si te pasan directamente esa carpeta
+    # Evita si te pasan directamente una carpeta excluida globalmente
     if os.path.basename(source_root.rstrip(os.sep)) in CARPETAS_EXCLUIDAS:
         print(f"[ERROR] La carpeta origen está excluida por configuración: {source_root}", file=sys.stderr)
         sys.exit(1)
+
+    exclude_root = parse_exclude_list(args.exclude_root)
 
     os.makedirs(dest_folder, exist_ok=True)
 
@@ -352,7 +423,8 @@ def main():
             source_root,
             usar_ia=bool(args.ia),
             ollama_url=args.ollama_url,
-            model=args.model
+            model=args.model,
+            exclude_root=exclude_root
         )
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(contenido)
@@ -364,8 +436,11 @@ def main():
         sys.exit(2)
 
     print(f"[OK] Reporte generado: {out_path}")
+    if exclude_root:
+        print(f"[OK] Excluyendo en raíz: {', '.join(sorted(exclude_root))}")
     if args.ia:
         print(f"[OK] IA activada: modelo={args.model} url={args.ollama_url}")
+
 
 if __name__ == "__main__":
     main()
