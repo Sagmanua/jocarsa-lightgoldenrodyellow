@@ -1,4 +1,5 @@
 
+
 # lightgoldenrodyellow.py
 
 Generador ligero de reportes Markdown para proyectos de código.
@@ -8,6 +9,7 @@ Este repositorio contiene un script en Python (`lightgoldenrodyellow.py`) que re
 * Un **árbol de directorios** estilo `tree` (con exclusiones configurables).
 * El **código intercalado**: incluye el contenido de cada archivo permitido dentro de bloques Markdown con el lenguaje adecuado.
 * (Opcional) **Resúmenes automáticos con IA local** usando Ollama y el modelo `qwen2.5-coder:7b`.
+* Exclusión opcional de carpetas solo en el nivel raíz del proyecto.
 
 Ideal para:
 
@@ -22,6 +24,7 @@ Ideal para:
 
 * ✅ Árbol de directorios con conectores (`├──`, `└──`).
 * ✅ Exclusión automática de carpetas comunes y de `documentacion`.
+* ✅ Opción para excluir carpetas **solo en el nivel raíz**.
 * ✅ Inserta el contenido de archivos permitidos en bloques Markdown con *syntax highlighting*.
 * ✅ Opción `-ia` para generar:
 
@@ -65,6 +68,8 @@ Ejecuta el script indicando:
 1. Carpeta origen a inspeccionar
 2. Carpeta destino donde guardar el reporte
 
+---
+
 ### Modo estándar (sin IA)
 
 ```bash
@@ -100,7 +105,35 @@ Salida típica:
 
 ---
 
-### Opciones avanzadas
+## Exclusión de carpetas solo en la raíz
+
+Puedes excluir carpetas **únicamente en el nivel raíz del proyecto** usando:
+
+```bash
+--exclude-root build,docs,tmp
+```
+
+Ejemplo:
+
+```bash
+python3 lightgoldenrodyellow.py ./mi_proyecto ./reportes \
+  --exclude-root build,docs,tmp
+```
+
+Esto significa:
+
+* Si `build`, `docs` o `tmp` están directamente bajo `mi_proyecto/`, se excluyen.
+* Si existe una carpeta con el mismo nombre dentro de una subcarpeta, **sí se analizará**, salvo que esté en `CARPETAS_EXCLUIDAS`.
+
+Salida adicional:
+
+```
+[OK] Excluyendo en raíz: build, docs, tmp
+```
+
+---
+
+## Opciones avanzadas
 
 Puedes personalizar el endpoint o modelo:
 
@@ -136,7 +169,7 @@ Los resúmenes:
 
 ## Exclusiones automáticas
 
-El script excluye automáticamente:
+El script excluye automáticamente (en todos los niveles):
 
 ```
 .git
@@ -169,7 +202,7 @@ EXTENSIONES_PERMITIDAS = (
 
 ---
 
-### Carpetas excluidas
+### Carpetas excluidas (globales)
 
 ```python
 CARPETAS_EXCLUIDAS = {
@@ -208,6 +241,7 @@ LANG_MAP = {
   * Excluir archivos por patrón.
   * Generar solo resúmenes sin código.
   * Crear documentación técnica automática para clientes.
+  * Integrarlo en pipelines CI/CD para generar documentación automática por versión.
 
 ---
 
@@ -218,6 +252,7 @@ LANG_MAP = {
 * Auditoría técnica rápida.
 * Documentación automática de proyectos legacy.
 * Exportar proyectos docentes para análisis estructural.
+* Generar documentación enriquecida para proyectos de formación.
 
 ---
 
