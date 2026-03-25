@@ -6,6 +6,7 @@ import json
 import hashlib
 import urllib.request
 import urllib.error
+import time
 from datetime import datetime
 
 # =========================
@@ -28,6 +29,57 @@ LANG_MAP = {
     ".cpp": "cpp", ".cu": "cuda", ".h": "c", ".json": "json",
     ".xml": "xml", ".md": "markdown",
 }
+
+# =========================
+# Progress Tracker
+# =========================
+class ProgressTracker:
+    def __init__(self, total_tasks: int):
+        self.total = total_tasks
+        self.done = 0
+        self.start_time = time.time()
+
+    def increment(self, name: str = ""):
+        self.done += 1
+        elapsed = time.time() - self.start_time
+        avg_time_per_task = elapsed / self.done
+        remaining = self.total - self.done
+        eta_sec = remaining * avg_time_per_task
+        
+        m, s = divmod(int(eta_sec), 60)
+        h, m = divmod(m, 60)
+        eta_str = f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+        
+        # Formatear el nombre para que no rompa la consola si es muy largo
+        name_clean = name[:30].ljust(30)
+        
+        sys.stdout.write(f"\r[IA Progress] {self.done}/{self.total} tareas | ETA: {eta_str} | Actual: {name_clean}")
+        sys.stdout.flush()
+
+    def finish(self):
+        sys.stdout.write("\n")
+
+
+def contar_tareas(ruta: str, exclude_root: set, _is_root: bool = True) -> int:
+    """Cuenta cuántos archivos y carpetas válidos se procesarán con la IA."""
+    count = 1  # 1 por el resumen de la carpeta en sí
+    try:
+        entradas = os.listdir(ruta)
+    except Exception:
+        return count
+
+    for e in entradas:
+        ruta_completa = os.path.join(ruta, e)
+        if os.path.isfile(ruta_completa) and e.lower().endswith(EXTENSIONES_PERMITIDAS):
+            count += 1
+        elif os.path.isdir(ruta_completa):
+            if e in CARPETAS_EXCLUIDAS:
+                continue
+            if _is_root and e in exclude_root:
+                continue
+            count += contar_tareas(ruta_completa, exclude_root, False)
+            
+    return count
 
 # =========================
 # IA (Ollama)
@@ -66,7 +118,6 @@ def _sha1(text: str) -> str:
 
 
 def resumir_archivo_con_ia(ruta_archivo: str, contenido: str, relpath: str, ollama_url: str, model: str) -> str:
-    # Recorte para evitar prompts gigantes (ajusta si quieres)
     max_chars = 12000
     snippet = contenido[:max_chars]
 
@@ -88,14 +139,8 @@ Contenido (posiblemente recortado):
 
 
 def resumir_carpeta_con_ia(nombre_carpeta: str, relpath: str, archivos_info: list, ollama_url: str, model: str) -> str:
-    """
-    archivos_info: lista de dicts:
-      { "path": "...", "summary": "...", "name": "...", "ext": "..."}
-    """
-    # Construye un contexto compacto para la carpeta
-    # (solo nombres y resúmenes ya calculados)
     partes = []
-    for a in archivos_info[:80]:  # límite defensivo
+    for a in archivos_info[:80]:
         s = (a.get("summary") or "").replace("\n", " ").strip()
         if len(s) > 300:
             s = s[:300] + "…"
@@ -123,10 +168,6 @@ Resúmenes de archivos:
 # Utilidades
 # =========================
 def parse_exclude_list(value: str) -> set[str]:
-    """
-    Parses comma-separated list: "a,b,c" -> {"a","b","c"}
-    Accepts empty/None.
-    """
     if not value:
         return set()
     parts = [p.strip() for p in value.split(",")]
@@ -134,9 +175,6 @@ def parse_exclude_list(value: str) -> set[str]:
 
 
 def construir_mapa_directorios(ruta_raiz: str, excluir_root: set[str] | None = None) -> str:
-    """Devuelve un árbol de directorios estilo 'tree', excluyendo carpetas no deseadas.
-       excluir_root: carpetas excluidas SOLO en el nivel raíz del proyecto.
-    """
     if excluir_root is None:
         excluir_root = set()
 
@@ -154,11 +192,9 @@ def construir_mapa_directorios(ruta_raiz: str, excluir_root: set[str] | None = N
         for e in entradas:
             full = os.path.join(dir_path, e)
 
-            # Exclusión global
             if os.path.isdir(full) and e in CARPETAS_EXCLUIDAS:
                 continue
 
-            # Exclusión SOLO en raíz
             if es_root and os.path.isdir(full) and e in excluir_root:
                 continue
 
@@ -185,16 +221,10 @@ def generar_reporte_intercalado(
     cache: dict | None = None,
     rel_base: str | None = None,
     root_excludes: set[str] | None = None,
-    _is_root: bool = False
+    _is_root: bool = False,
+    progress: ProgressTracker | None = None
 ) -> str:
-    """
-    Recorre la carpeta y, para cada archivo con extensión permitida,
-    inserta su contenido en un bloque de código Markdown.
-    Si usar_ia=True, añade resúmenes de carpeta y archivo.
-
-    root_excludes: carpetas a excluir SOLO en el nivel raíz del proyecto.
-    _is_root: uso interno para saber si estamos en la raíz del proyecto.
-    """
+    
     if root_excludes is None:
         root_excludes = set()
 
@@ -218,7 +248,7 @@ def generar_reporte_intercalado(
     # --------
     # Archivos de este nivel
     # --------
-    archivos_resumen_carpeta = []  # para IA (resumen de carpeta)
+    archivos_resumen_carpeta = [] 
 
     for entrada in entradas:
         ruta_completa = os.path.join(ruta_raiz, entrada)
@@ -235,7 +265,6 @@ def generar_reporte_intercalado(
 
             relpath_archivo = os.path.relpath(ruta_completa, start=rel_base)
 
-            # Resumen IA por archivo (si aplica)
             resumen_archivo = ""
             if usar_ia:
                 if cache is None:
@@ -253,6 +282,9 @@ def generar_reporte_intercalado(
                     )
                     cache[key] = resumen_archivo
 
+                if progress:
+                    progress.increment(entrada)
+
                 lineas.append(f"Resumen (IA): {resumen_archivo}")
 
                 archivos_resumen_carpeta.append({
@@ -262,7 +294,6 @@ def generar_reporte_intercalado(
                     "summary": resumen_archivo
                 })
 
-            # Bloque de código
             lineas.append(f"```{lang}")
             lineas.append(contenido)
             lineas.append("```")
@@ -284,20 +315,21 @@ def generar_reporte_intercalado(
             )
             cache[key] = resumen_carpeta
 
+        if progress:
+            progress.increment(f"Dir: {nombre_carpeta}")
+
         lineas.insert(1, f"Resumen de carpeta (IA): {resumen_carpeta}")
 
     # --------
-    # Subcarpetas (excluyendo las no deseadas)
+    # Subcarpetas
     # --------
     for entrada in entradas:
         ruta_completa = os.path.join(ruta_raiz, entrada)
 
         if os.path.isdir(ruta_completa):
-            # Exclusión global
             if entrada in CARPETAS_EXCLUIDAS:
                 continue
 
-            # Exclusión SOLO en raíz
             if _is_root and entrada in root_excludes:
                 continue
 
@@ -311,7 +343,8 @@ def generar_reporte_intercalado(
                     cache=cache,
                     rel_base=rel_base,
                     root_excludes=root_excludes,
-                    _is_root=False
+                    _is_root=False,
+                    progress=progress
                 )
             )
 
@@ -325,20 +358,19 @@ def generar_reporte(
     model: str = DEFAULT_MODEL,
     exclude_root: set[str] | None = None
 ) -> str:
-    """
-    Genera el contenido completo del reporte en Markdown:
-    - Árbol de directorios
-    - Código intercalado
-    - (Opcional) Resúmenes IA de carpeta y archivo
-
-    exclude_root: carpetas excluidas SOLO en el nivel raíz del proyecto.
-    """
+    
     if exclude_root is None:
         exclude_root = set()
 
     arbol = construir_mapa_directorios(ruta_origen, excluir_root=exclude_root)
-
     cache = {}
+    
+    progress = None
+    if usar_ia:
+        print("[INFO] Calculando archivos para estimar tiempo...")
+        total_tareas = contar_tareas(ruta_origen, exclude_root)
+        progress = ProgressTracker(total_tareas)
+
     intercalado = generar_reporte_intercalado(
         ruta_origen,
         usar_ia=usar_ia,
@@ -347,8 +379,12 @@ def generar_reporte(
         cache=cache,
         rel_base=ruta_origen,
         root_excludes=exclude_root,
-        _is_root=True
+        _is_root=True,
+        progress=progress
     )
+
+    if progress:
+        progress.finish()
 
     partes = []
     partes.append("# Reporte de proyecto\n")
@@ -369,14 +405,12 @@ def main():
     parser.add_argument("source_root", help="Carpeta origen a inspeccionar")
     parser.add_argument("dest_folder", help="Carpeta destino donde guardar el reporte")
 
-    # Flag IA
     parser.add_argument(
         "-ia", "--ia",
         action="store_true",
         help="Si se indica, usa Ollama para resumir cada archivo y carpeta (en español)."
     )
 
-    # Opcionales endpoint/modelo
     parser.add_argument(
         "--ollama-url",
         default=DEFAULT_OLLAMA_URL,
@@ -388,7 +422,6 @@ def main():
         help=f"Modelo de Ollama (por defecto: {DEFAULT_MODEL})"
     )
 
-    # NUEVO: excluir carpetas SOLO en el nivel raíz del proyecto
     parser.add_argument(
         "--exclude-root",
         default="",
@@ -404,7 +437,6 @@ def main():
         print(f"[ERROR] La carpeta origen no existe o no es un directorio: {source_root}", file=sys.stderr)
         sys.exit(1)
 
-    # Evita si te pasan directamente una carpeta excluida globalmente
     if os.path.basename(source_root.rstrip(os.sep)) in CARPETAS_EXCLUIDAS:
         print(f"[ERROR] La carpeta origen está excluida por configuración: {source_root}", file=sys.stderr)
         sys.exit(1)
