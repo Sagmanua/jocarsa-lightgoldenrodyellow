@@ -88,7 +88,7 @@ DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
 DEFAULT_MODEL = "qwen2.5-coder:7b"
 
 
-def ollama_generate(prompt: str, ollama_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_MODEL, timeout: int = 180) -> str:
+def ollama_generate(prompt: str, ollama_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_MODEL) -> str:
     payload = {
         "model": model,
         "prompt": prompt,
@@ -101,7 +101,7 @@ def ollama_generate(prompt: str, ollama_url: str = DEFAULT_OLLAMA_URL, model: st
         headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
             j = json.loads(raw)
             return (j.get("response") or "").strip()
